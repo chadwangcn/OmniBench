@@ -1,6 +1,6 @@
 {
   "api_keys": {
-    "figma": "figd_xxx",
+    "figma": "figd_xxx_替换为你的Figma Personal Access Token",
     "custom": {
       "doubao_ark": "ark-xxx",
       "openai": "sk-xxx",

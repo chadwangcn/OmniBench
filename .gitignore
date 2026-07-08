@@ -12,3 +12,7 @@ node_modules/
 __pycache__/
 *.pyc
 .DS_Store
+# 配置文件（含敏感信息）
+config.json
+skills/omnibench/config.json
+*.local.json

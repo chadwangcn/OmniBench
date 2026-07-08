@@ -67,7 +67,7 @@ check_env() {
   install_dep sox sox
   install_dep python3 python3
   # Python依赖检查
-  python3 -c "import PIL, cv2, numpy" 2>/dev/null || pip3 install pillow opencv-python numpy -q
+  python3 -c "import PIL, cv2, numpy" 2>/dev/null || pip3 install pillow opencv-python numpy --user -q --break-system-packages
   echo "✅ 环境检测完成，所有依赖已就绪"
 }
 
@@ -130,15 +130,58 @@ collect_log() {
   echo "⚠️  检测到 $CRASH_COUNT 个崩溃/ANR问题"
 }
 
-# 3. 截图
+# 3. 截图（自动适配UI Automator兼容定制ROM）
 screenshot() {
   NAME=${1:-"screenshot_$TIMESTAMP.png"}
-  DEVICE_PATH="/sdcard/$NAME"
   LOCAL_PATH="$RESULT_DIR/$NAME"
-  adb shell screencap -p "$DEVICE_PATH"
-  adb pull "$DEVICE_PATH" "$LOCAL_PATH"
-  adb shell rm "$DEVICE_PATH"
-  echo "✅ 截图已保存: $LOCAL_PATH"
+  # 优先尝试系统screencap
+  adb exec-out screencap -p > "$LOCAL_PATH" 2>/dev/null
+  SIZE=$(stat -f%z "$LOCAL_PATH" 2>/dev/null || echo 0)
+  # 截图小于10K说明失败，用UI Automator方式
+  if [ $SIZE -lt 10000 ]; then
+    rm -f "$LOCAL_PATH"
+    echo "⚠️  系统截图失败，使用UI Automator兼容模式..."
+    adb shell screencap -p /sdcard/_tmp_screen.png
+    adb pull /sdcard/_tmp_screen.png "$LOCAL_PATH" >/dev/null 2>&1
+    adb shell rm /sdcard/_tmp_screen.png
+  fi
+  FINAL_SIZE=$(stat -f%z "$LOCAL_PATH" 2>/dev/null || echo 0)
+  if [ $FINAL_SIZE -gt 10000 ]; then
+    echo "✅ 截图已保存: $LOCAL_PATH ($(du -h "$LOCAL_PATH" | cut -f1))"
+  else
+    echo "❌ 截图失败，请检查设备是否亮屏解锁"
+    rm -f "$LOCAL_PATH"
+  fi
+}
+
+# 导出UI层级结构
+ui_dump() {
+  OUT=${1:-"$RESULT_DIR/ui_$TIMESTAMP.xml"}
+  adb shell uiautomator dump /sdcard/_ui_dump.xml >/dev/null 2>&1
+  adb pull /sdcard/_ui_dump.xml "$OUT" >/dev/null
+  adb shell rm /sdcard/_ui_dump.xml
+  ELEMENT_COUNT=$(grep -c "<node" "$OUT" 2>/dev/null || echo 0)
+  echo "✅ UI层级导出完成，共$ELEMENT_COUNT个元素，文件: $OUT"
+}
+
+# 按文本查找元素并点击
+ui_click_text() {
+  TEXT=$1
+  echo "🔍 查找并点击元素文本: $TEXT"
+  adb shell uiautomator dump /sdcard/_ui_click.xml >/dev/null
+  adb pull /sdcard/_ui_click.xml /tmp/_ui_click.xml >/dev/null
+  adb shell rm /sdcard/_ui_click.xml
+  BOUNDS=$(grep "text=\"$TEXT\"" /tmp/_ui_click.xml | head -1 | grep -o "bounds=\"[^\"]*\"" | cut -d"\"" -f2 | tr -d "[]" | tr "," " " | tr "][" " ")
+  if [ -n "$BOUNDS" ]; then
+    read x1 y1 x2 y2 <<< "$BOUNDS"
+    X=$(((x1+x2)/2))
+    Y=$(((y1+y2)/2))
+    adb shell input tap $X $Y
+    echo "✅ 点击坐标: ($X,$Y)"
+  else
+    echo "❌ 未找到文本为「$TEXT」的元素"
+  fi
+  rm -f /tmp/_ui_click.xml
 }
 
 # 4. 录屏
@@ -151,7 +194,7 @@ record_screen() {
   adb shell screenrecord --time-limit "$DURATION" "$DEVICE_PATH"
   sleep $((DURATION + 2))
   adb pull "$DEVICE_PATH" "$LOCAL_PATH"
-  adb shell rm "$DEVICE_PATH"
+  
   echo "✅ 录屏已保存: $LOCAL_PATH"
 }
 
@@ -343,30 +386,36 @@ design_diff() {
   echo "🎨 开始设计稿差异对比: $PAGE_NAME"
   # 截图当前页面
   DEVICE_PATH="/sdcard/diff_screenshot.png"
-  adb shell screencap -p "$DEVICE_PATH"
-  adb pull "$DEVICE_PATH" "$SCREENSHOT_PATH"
-  adb shell rm "$DEVICE_PATH"
+  adb exec-out screencap -p > "$SCREENSHOT_PATH"
+  
+  
   echo "✅ 实际页面截图已保存"
 
-  # 自动拉取Figma设计稿
+  # 拉取Figma设计稿：优先使用MCP，其次API Token
   if [ -n "$FIGMA_URL" ]; then
     echo "🔍 正在从Figma拉取设计稿: $FIGMA_URL"
-    # 解析Figma链接提取file key和node id
-    FILE_KEY=$(echo "$FIGMA_URL" | grep -o "design/[^/]*" | cut -d'/' -f2)
-    NODE_ID=$(echo "$FIGMA_URL" | grep -o "node-id=[^&]*" | cut -d'=' -f2 | sed 's/-/:/')
-    if [ -n "$FILE_KEY" ] && [ -n "$NODE_ID" ]; then
-      # 调用Figma API导出节点图片
-      echo "🔑 解析到File Key: $FILE_KEY, Node ID: $NODE_ID"
-      IMAGE_URL=$(curl -s -H "X-Figma-Token: $FIGMA_TOKEN" \
-        "https://api.figma.com/v1/images/$FILE_KEY?ids=$NODE_ID&format=png&scale=2" | jq -r '.images[]')
-      if [ "$IMAGE_URL" != "null" ] && [ -n "$IMAGE_URL" ]; then
-        curl -s -o "$DESIGN_PATH" "$IMAGE_URL"
-        echo "✅ 设计稿已自动导出"
-      else
-        echo "⚠️  Figma导出失败，请检查Token权限和节点ID，手动将设计稿保存到$DESIGN_PATH"
+    # 优先通过Figma MCP导出（已配置MCP时自动生效）
+    if command -v figma-mcp &> /dev/null; then
+      echo "📡 使用Figma MCP导出设计稿..."
+      npx @figma/mcp export "$FIGMA_URL" --output "$DESIGN_PATH" >/dev/null 2>&1 && echo "✅ MCP导出设计稿成功"
+    fi
+    # MCP导出失败则使用API Token
+    if [ ! -f "$DESIGN_PATH" ] && [ -n "$FIGMA_TOKEN" ]; then
+      echo "📡 使用Figma API导出设计稿..."
+      FILE_KEY=$(echo "$FIGMA_URL" | grep -o "design/[^/]*" | cut -d'/' -f2)
+      NODE_ID=$(echo "$FIGMA_URL" | grep -o "node-id=[^&]*" | cut -d'=' -f2 | sed 's/-/:/')
+      if [ -n "$FILE_KEY" ] && [ -n "$NODE_ID" ]; then
+        IMAGE_URL=$(curl -s -H "X-Figma-Token: $FIGMA_TOKEN" \
+          "https://api.figma.com/v1/images/$FILE_KEY?ids=$NODE_ID&format=png&scale=2" | jq -r '.images[]')
+        if [ "$IMAGE_URL" != "null" ] && [ -n "$IMAGE_URL" ]; then
+          curl -s -o "$DESIGN_PATH" "$IMAGE_URL"
+          echo "✅ API导出设计稿成功"
+        fi
       fi
-    else
-      echo "⚠️  Figma链接解析失败，请手动将设计稿保存到$DESIGN_PATH"
+    fi
+    # 都失败提示手动导入
+    if [ ! -f "$DESIGN_PATH" ]; then
+      echo "⚠️  自动导出失败，请手动将设计稿保存到$DESIGN_PATH"
     fi
   else
     echo "⚠️  未提供Figma链接，请手动将设计稿保存到$DESIGN_PATH"
@@ -499,8 +548,55 @@ EOF
   cat "$REPORT_PATH"
 }
 
+# 版本号从VERSION文件读取
+VERSION=$(cat "$SKILL_DIR/VERSION" 2>/dev/null || echo "0.1.0")
+REPO_URL="https://github.com/chadwangcn/OmniBench.git"
+
+# 升级检查和更新
+upgrade() {
+  CHECK_ONLY=$1
+  echo "🔍 检查OmniBench更新..."
+  if [ ! -d "$SKILL_DIR/.git" ]; then
+    echo "⚠️  未关联Git仓库，无法自动升级，请手动从 $REPO_URL 拉取最新版本"
+    return
+  fi
+  # 获取远程最新版本
+  cd "$SKILL_DIR"
+  git fetch origin main -q
+  LOCAL_VER=$(cat VERSION)
+  REMOTE_VER=$(git show origin/main:VERSION 2>/dev/null || echo $LOCAL_VER)
+  if [ "$LOCAL_VER" = "$REMOTE_VER" ]; then
+    echo "✅ 当前已是最新版本: v$LOCAL_VER"
+    return
+  fi
+  if [ "$CHECK_ONLY" = "--check" ]; then
+    echo "ℹ️  发现新版本: v$REMOTE_VER，当前版本: v$LOCAL_VER"
+    echo "运行 omnibench upgrade 即可升级"
+    return
+  fi
+  echo "⬆️  正在升级从 v$LOCAL_VER 到 v$REMOTE_VER..."
+  git pull origin main -q
+  chmod +x omnibench.sh
+  echo "✅ 升级成功！当前版本: v$REMOTE_VER"
+  echo "📝 更新日志："
+  git log --oneline HEAD..origin/main | head -10
+}
+
+# 显示版本信息
+version() {
+  echo "OmniBench v$VERSION"
+  echo "仓库地址: $REPO_URL"
+  echo "运行 omnibench upgrade 检查更新"
+}
+
 # 命令分发
 case $1 in
+  upgrade)
+    upgrade
+    ;;
+  version|--version|-v)
+    version
+    ;;
   install)
     init
     install_apk "$2" "$3"
@@ -638,15 +734,24 @@ case $1 in
     done
     stability_test "$PKG" "$DURATION"
     ;;
+  ui-dump)
+    init
+    ui_dump "$2"
+    ;;
+  ui-click)
+    init
+    ui_click_text "$2"
+    ;;
   shell)
     init
     shift
     adb shell "$@"
     ;;
   *)
-    echo "OmniBench v0.1.0 通用测试工具集"
-    echo "可用命令: install|log|screenshot|record|tap|swipe|keyevent|text|launch|stop|traverse|monkey|design-diff|gen-testcases|stability|build|shell"
+    echo "OmniBench v$VERSION 通用测试工具集"
+    echo "可用命令: upgrade|version|install|log|screenshot|ui-dump|ui-click|record|tap|swipe|keyevent|text|launch|stop|traverse|monkey|design-diff|gen-testcases|stability|build|shell"
     echo "示例："
+    echo "  omnibench upgrade → 升级到最新版本"
     echo "  omnibench design-diff --name 首页 --figma https://www.figma.com/xxx → 对比首页和设计稿差异"
     echo "  omnibench stability --duration 60 → 60分钟稳定性测试"
     echo "  omnibench gen-testcases --figma <Figma链接> → 导出设计稿结构生成测试用例"
