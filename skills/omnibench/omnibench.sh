@@ -1,19 +1,75 @@
 #!/bin/bash
-# ADB自动化测试工具脚本 - Lumi/K1设备专用
+# OmniBench 全栈自动化测试工具核心脚本 v0.1.0
 set -e
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 配置项
-RESULT_DIR="/Users/hydramr/Documents/HydraMind-Obsidian/02 执行项目/自有AI产品线/K1/测试结果/$(date +%Y-%m-%d)"
+# 配置项支持环境变量覆盖
+RESULT_DIR_DEFAULT="$HOME/Documents/HydraMind-Obsidian/02 执行项目/自有AI产品线/K1/测试结果/$(date +%Y-%m-%d)"
+RESULT_DIR="${OMNIBENCH_RESULT_DIR:-$RESULT_DIR_DEFAULT}"
 mkdir -p "$RESULT_DIR"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-PACKAGE_NAME="com.lumi.k1" # 默认K1应用包名
+PACKAGE_NAME="${OMNIBENCH_PACKAGE_NAME:-com.lumi.k1}"
+ARCH=$(uname -m)
+OS=$(uname -s)
 
-# 检查ADB是否安装
-check_adb() {
-  if ! command -v adb &> /dev/null; then
-    echo "❌ 未安装ADB，正在自动安装..."
-    brew install android-platform-tools
+# 自动检测并安装依赖，内置常用二进制
+install_dep() {
+  DEP_NAME=$1
+  BIN_PATH="$SKILL_DIR/bin/$OS/$ARCH/$DEP_NAME"
+  # 优先使用内置二进制，其次系统安装
+  if [ -f "$BIN_PATH" ] && [ -x "$BIN_PATH" ]; then
+    export PATH="$SKILL_DIR/bin/$OS/$ARCH:$PATH"
+    return
   fi
+  # 缺失依赖自动安装
+  if ! command -v $DEP_NAME &> /dev/null; then
+    echo "📦 缺失依赖 $DEP_NAME，正在自动安装..."
+    if command -v brew &> /dev/null; then
+      brew install $2
+    elif command -v apt &> /dev/null; then
+      sudo apt update && sudo apt install -y $2
+    elif command -v yum &> /dev/null; then
+      sudo yum install -y $2
+    else
+      echo "❌ 请先安装 $DEP_NAME 后再运行"
+      exit 1
+    fi
+  fi
+}
+
+load_config() {
+  # 加载配置文件
+  CONFIG_PATH="$SKILL_DIR/config.json"
+  if [ -f "$CONFIG_PATH" ]; then
+    echo "⚙️  加载配置文件: $CONFIG_PATH"
+    VOLC_KEY=$(jq -r '.volcengine_api_key // empty' "$CONFIG_PATH")
+    FIGMA_TOKEN=$(jq -r '.figma_personal_token // empty' "$CONFIG_PATH")
+    CI_URL=$(jq -r '.ci_build_url // empty' "$CONFIG_PATH")
+    CI_TOKEN=$(jq -r '.ci_token // empty' "$CONFIG_PATH")
+    OBSIDIAN_DIR=$(jq -r '.obsidian_result_dir // empty' "$CONFIG_PATH" | sed "s|~|$HOME|g")
+    PKG_NAME=$(jq -r '.default_package_name // empty' "$CONFIG_PATH")
+    [ -n "$OBSIDIAN_DIR" ] && RESULT_DIR="$OBSIDIAN_DIR/$(date +%Y-%m-%d)" && mkdir -p "$RESULT_DIR"
+    [ -n "$PKG_NAME" ] && PACKAGE_NAME="$PKG_NAME"
+  else
+    echo "⚠️  未找到配置文件，请复制config.example.json为config.json填写必要密钥（Figma/API Key等）"
+  fi
+}
+
+check_env() {
+  echo "🔍 OmniBench v0.1.0 环境检测中..."
+  # 创建内置二进制目录
+  mkdir -p "$SKILL_DIR/bin/$OS/$ARCH"
+  load_config
+  # 依赖检查
+  install_dep curl curl
+  install_dep jq jq
+  install_dep adb android-platform-tools
+  install_dep ffmpeg ffmpeg
+  install_dep sox sox
+  install_dep python3 python3
+  # Python依赖检查
+  python3 -c "import PIL, cv2, numpy" 2>/dev/null || pip3 install pillow opencv-python numpy -q
+  echo "✅ 环境检测完成，所有依赖已就绪"
 }
 
 # 获取连接设备
@@ -37,7 +93,7 @@ get_device() {
 
 # 初始化
 init() {
-  check_adb
+  check_env
   get_device
   echo "📂 测试结果保存目录: $RESULT_DIR"
 }
