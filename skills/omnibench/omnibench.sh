@@ -436,6 +436,9 @@ design_diff() {
     python3 -c "
 from PIL import Image, ImageChops, ImageDraw
 import os
+PAGE_NAME = '$PAGE_NAME'
+PKG = '$PKG'
+TEST_TIME = '$(date "+%Y-%m-%d %H:%M:%S")'
 actual = Image.open('$SCREENSHOT_PATH').convert('RGB')
 design = Image.open('$DESIGN_PATH').convert('RGB').resize(actual.size)
 diff = ImageChops.difference(actual, design)
@@ -458,14 +461,14 @@ result.paste(diff_rgba, mask=diff_rgba)
 result.save('$DIFF_PATH')
 similarity = max(0, 100 - (diff_count/(width*height))*100*5)
 open('$REPORT_PATH', 'w').write(f'''# UI还原度测试报告 - {PAGE_NAME}
-测试时间: $(date "+%Y-%m-%d %H:%M:%S")
-应用包名: $PKG
+测试时间: {TEST_TIME}
+应用包名: {PKG}
 ## 测试结果
 - ✅ UI还原度得分: {similarity:.1f}分
 - ❌ 差异像素点: {diff_count}个
-- 实际页面截图: ![实际页面](actual_${PAGE_NAME}.png)
-- 设计稿: ![设计稿](design_${PAGE_NAME}.png)
-- 差异标注图（红色为差异点）: ![差异标注](diff_${PAGE_NAME}.png)
+- 实际页面截图: ![实际页面](actual_{PAGE_NAME}.png)
+- 设计稿: ![设计稿](design_{PAGE_NAME}.png)
+- 差异标注图（红色为差异点）: ![差异标注](diff_{PAGE_NAME}.png)
 ''')
 print(f'✅ 对比完成，还原度得分: {similarity:.1f}分，报告已生成')
 "
