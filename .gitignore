@@ -1,0 +1,14 @@
+# 测试产物
+test_results/
+*.log
+*.tmp
+*.apk
+*.mp4
+*.wav
+*.png
+*.jpg
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
