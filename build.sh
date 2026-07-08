@@ -1,7 +1,8 @@
 #!/bin/bash
 # OmniBench 一键打包脚本，生成可分发的ZIP包
 set -e
-VERSION="0.1.0"
+cd "$(dirname "$0")"
+VERSION=$(cat VERSION 2>/dev/null || echo "0.1.0")
 OUT_DIR="./dist"
 BUILD_DIR="$OUT_DIR/OmniBench-v$VERSION"
 rm -rf "$BUILD_DIR" "$OUT_DIR"/OmniBench*.zip
@@ -9,7 +10,11 @@ mkdir -p "$BUILD_DIR" "$BUILD_DIR/bin/Darwin/arm64" "$BUILD_DIR/bin/Darwin/x86_6
 
 # 复制核心文件
 cp -r skills/omnibench/* "$BUILD_DIR/"
-cp README.md LICENSE "$BUILD_DIR/" 2>/dev/null || true
+cp README.md LICENSE CHANGELOG.md VERSION "$BUILD_DIR/" 2>/dev/null || true
+# 确保只包含示例配置，不包含用户本地真实配置
+if [ -f "$BUILD_DIR/config.json" ] && grep -q "figd_" "$BUILD_DIR/config.json" && ! grep -q "xxx" "$BUILD_DIR/config.json"; then
+  cp skills/omnibench/config.example.json "$BUILD_DIR/config.json"
+fi
 
 # 下载预置常用二进制（Mac arm64版本）
 echo "📦 下载预置二进制工具..."

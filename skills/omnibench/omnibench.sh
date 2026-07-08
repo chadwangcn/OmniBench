@@ -2,9 +2,14 @@
 # OmniBench 全栈自动化测试工具核心脚本 v0.1.0
 set -e
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SKILL_DIR/../.." && pwd)"
+# 兼容两种场景：开发环境（脚本在skills/omnibench/下）、安装后环境（脚本在skills目录下，VERSION同目录）
+if [ -f "$SKILL_DIR/VERSION" ]; then
+  ROOT_DIR="$SKILL_DIR"
+else
+  ROOT_DIR="$(cd "$SKILL_DIR/../.." && pwd)"
+fi
 
-# 版本号从根目录VERSION文件读取
+# 版本号从VERSION文件读取
 VERSION=$(cat "$ROOT_DIR/VERSION" 2>/dev/null || echo "0.1.0")
 REPO_URL="https://github.com/chadwangcn/OmniBench.git"
 
