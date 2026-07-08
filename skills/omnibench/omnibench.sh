@@ -2,6 +2,11 @@
 # OmniBench 全栈自动化测试工具核心脚本 v0.1.0
 set -e
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SKILL_DIR/../.." && pwd)"
+
+# 版本号从根目录VERSION文件读取
+VERSION=$(cat "$ROOT_DIR/VERSION" 2>/dev/null || echo "0.1.0")
+REPO_URL="https://github.com/chadwangcn/OmniBench.git"
 
 # 配置项支持环境变量覆盖
 RESULT_DIR_DEFAULT="$HOME/Documents/HydraMind-Obsidian/02 执行项目/自有AI产品线/K1/测试结果/$(date +%Y-%m-%d)"
@@ -55,7 +60,7 @@ load_config() {
 }
 
 check_env() {
-  echo "🔍 OmniBench v0.1.0 环境检测中..."
+  echo "🔍 OmniBench v$VERSION 环境检测中..."
   # 创建内置二进制目录
   mkdir -p "$SKILL_DIR/bin/$OS/$ARCH"
   load_config
@@ -548,20 +553,16 @@ EOF
   cat "$REPORT_PATH"
 }
 
-# 版本号从VERSION文件读取
-VERSION=$(cat "$SKILL_DIR/VERSION" 2>/dev/null || echo "0.1.0")
-REPO_URL="https://github.com/chadwangcn/OmniBench.git"
-
 # 升级检查和更新
 upgrade() {
   CHECK_ONLY=$1
   echo "🔍 检查OmniBench更新..."
-  if [ ! -d "$SKILL_DIR/.git" ]; then
+  if [ ! -d "$ROOT_DIR/.git" ]; then
     echo "⚠️  未关联Git仓库，无法自动升级，请手动从 $REPO_URL 拉取最新版本"
     return
   fi
   # 获取远程最新版本
-  cd "$SKILL_DIR"
+  cd "$ROOT_DIR"
   git fetch origin main -q
   LOCAL_VER=$(cat VERSION)
   REMOTE_VER=$(git show origin/main:VERSION 2>/dev/null || echo $LOCAL_VER)
