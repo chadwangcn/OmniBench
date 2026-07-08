@@ -257,6 +257,13 @@ design_diff() {
   DIFF_PATH="$DIFF_DIR/diff_${PAGE_NAME}.png"
   REPORT_PATH="$DIFF_DIR/report.md"
 
+  # 检查Figma Token配置
+  if [ -z "$FIGMA_TOKEN" ]; then
+    echo "❌ 未配置Figma Personal Access Token，请在config.json中填写figma_personal_token字段"
+    echo "🔍 获取方式：Figma → 头像 → Settings → Personal access tokens → Generate new token"
+    exit 1
+  fi
+
   echo "🎨 开始设计稿差异对比: $PAGE_NAME"
   # 截图当前页面
   DEVICE_PATH="/sdcard/diff_screenshot.png"
@@ -265,11 +272,26 @@ design_diff() {
   adb shell rm "$DEVICE_PATH"
   echo "✅ 实际页面截图已保存"
 
-  # 自动拉取Figma设计稿（对接Figma MCP）
+  # 自动拉取Figma设计稿
   if [ -n "$FIGMA_URL" ]; then
     echo "🔍 正在从Figma拉取设计稿: $FIGMA_URL"
-    # 调用Figma MCP导出对应节点图片
-    npx @figma/mcp export "$FIGMA_URL" --output "$DESIGN_PATH" >/dev/null 2>&1 || echo "⚠️  Figma自动导出失败，请手动将设计稿保存到$DESIGN_PATH"
+    # 解析Figma链接提取file key和node id
+    FILE_KEY=$(echo "$FIGMA_URL" | grep -o "design/[^/]*" | cut -d'/' -f2)
+    NODE_ID=$(echo "$FIGMA_URL" | grep -o "node-id=[^&]*" | cut -d'=' -f2 | sed 's/-/:/')
+    if [ -n "$FILE_KEY" ] && [ -n "$NODE_ID" ]; then
+      # 调用Figma API导出节点图片
+      echo "🔑 解析到File Key: $FILE_KEY, Node ID: $NODE_ID"
+      IMAGE_URL=$(curl -s -H "X-Figma-Token: $FIGMA_TOKEN" \
+        "https://api.figma.com/v1/images/$FILE_KEY?ids=$NODE_ID&format=png&scale=2" | jq -r '.images[]')
+      if [ "$IMAGE_URL" != "null" ] && [ -n "$IMAGE_URL" ]; then
+        curl -s -o "$DESIGN_PATH" "$IMAGE_URL"
+        echo "✅ 设计稿已自动导出"
+      else
+        echo "⚠️  Figma导出失败，请检查Token权限和节点ID，手动将设计稿保存到$DESIGN_PATH"
+      fi
+    else
+      echo "⚠️  Figma链接解析失败，请手动将设计稿保存到$DESIGN_PATH"
+    fi
   else
     echo "⚠️  未提供Figma链接，请手动将设计稿保存到$DESIGN_PATH"
   fi
