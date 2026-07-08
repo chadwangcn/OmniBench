@@ -1,13 +1,21 @@
 {
-  "volcengine_api_key": "ark-xxx",
-  "figma_personal_token": "figd_xxx",
-  "ci_build_url": "https://ci.lumi.ai/api/build",
-  "ci_token": "ci_xxx",
-  "obsidian_result_dir": "~/Documents/HydraMind-Obsidian/02 执行项目/自有AI产品线/K1/测试结果/",
-  "default_package_name": "com.lumi.k1",
+  "api_keys": {
+    "figma": "figd_xxx",
+    "custom": {
+      "doubao_ark": "ark-xxx",
+      "openai": "sk-xxx",
+      "other": "xxx"
+    }
+  },
+  "ci": {
+    "build_url": "https://ci.example.com/api/build",
+    "token": "ci_xxx"
+  },
+  "obsidian_result_dir": "~/Documents/HydraMind-Obsidian/测试结果/",
+  "default_package_name": "com.example.app",
   "devices": [
     {
-      "name": "K1测试机1",
+      "name": "测试设备1",
       "serial": "xxx"
     }
   ]

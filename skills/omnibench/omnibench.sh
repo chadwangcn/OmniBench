@@ -42,10 +42,9 @@ load_config() {
   CONFIG_PATH="$SKILL_DIR/config.json"
   if [ -f "$CONFIG_PATH" ]; then
     echo "⚙️  加载配置文件: $CONFIG_PATH"
-    VOLC_KEY=$(jq -r '.volcengine_api_key // empty' "$CONFIG_PATH")
-    FIGMA_TOKEN=$(jq -r '.figma_personal_token // empty' "$CONFIG_PATH")
-    CI_URL=$(jq -r '.ci_build_url // empty' "$CONFIG_PATH")
-    CI_TOKEN=$(jq -r '.ci_token // empty' "$CONFIG_PATH")
+    FIGMA_TOKEN=$(jq -r '.api_keys.figma // empty' "$CONFIG_PATH")
+    CI_URL=$(jq -r '.ci.build_url // empty' "$CONFIG_PATH")
+    CI_TOKEN=$(jq -r '.ci.token // empty' "$CONFIG_PATH")
     OBSIDIAN_DIR=$(jq -r '.obsidian_result_dir // empty' "$CONFIG_PATH" | sed "s|~|$HOME|g")
     PKG_NAME=$(jq -r '.default_package_name // empty' "$CONFIG_PATH")
     [ -n "$OBSIDIAN_DIR" ] && RESULT_DIR="$OBSIDIAN_DIR/$(date +%Y-%m-%d)" && mkdir -p "$RESULT_DIR"
@@ -243,6 +242,69 @@ monkey_test() {
   adb shell monkey -p "$PKG" --throttle 300 --pct-touch 70 --pct-motion 20 --pct-trackball 5 --pct-nav 5 --ignore-crashes --ignore-timeouts -v "$EVENTS" > "$MONKEY_LOG" 2>&1
   CRASH_COUNT=$(grep -c "CRASH\|ANR" "$MONKEY_LOG" || true)
   echo "✅ Monkey测试完成，检测到$CRASH_COUNT个崩溃/ANR，日志保存在$MONKEY_LOG"
+}
+
+# 8. 设计稿差异对比
+# 11. 读取Figma设计稿自动生成测试用例
+generate_test_cases() {
+  FIGMA_URL=$1
+  OUTPUT_FILE=$2
+  TEST_CASE_DIR="$RESULT_DIR/test_cases_${TIMESTAMP}"
+  mkdir -p "$TEST_CASE_DIR"
+  OUTPUT_PATH="${OUTPUT_FILE:-$TEST_CASE_DIR/test_cases.md}"
+
+  if [ -z "$FIGMA_TOKEN" ]; then
+    echo "❌ 未配置Figma Token，请在config.json中填写"
+    exit 1
+  fi
+
+  echo "🔍 解析Figma设计稿..."
+  FILE_KEY=$(echo "$FIGMA_URL" | grep -o "design/[^/]*" | cut -d'/' -f2)
+  NODE_ID=$(echo "$FIGMA_URL" | grep -o "node-id=[^&]*" | cut -d'=' -f2 | sed 's/-/:/')
+
+  if [ -z "$FILE_KEY" ]; then
+    echo "❌ Figma链接格式错误"
+    exit 1
+  fi
+
+  # 拉取Figma节点结构
+  FIGMA_DATA=$(curl -s -H "X-Figma-Token: $FIGMA_TOKEN" "https://api.figma.com/v1/files/$FILE_KEY/nodes?ids=$NODE_ID")
+  PAGE_NAME=$(echo "$FIGMA_DATA" | jq -r '.nodes[].document.name')
+  echo "📄 设计页面: $PAGE_NAME"
+
+  # 自动分析生成测试用例（交给AI处理结构，这里导出结构数据）
+  echo "$FIGMA_DATA" > "$TEST_CASE_DIR/figma_data.json"
+  cat > "$OUTPUT_PATH" <<EOF
+# $PAGE_NAME UI测试用例（自动生成）
+生成时间: $(date "+%Y-%m-%d %H:%M:%S")
+Figma链接: $FIGMA_URL
+
+## 测试范围
+- UI还原度校验
+- 交互点击测试
+- 页面跳转校验
+- 边界场景测试
+
+## 测试用例
+| 用例ID | 测试步骤 | 预期结果 | 优先级 |
+|--------|----------|----------|--------|
+EOF
+
+  # 提取所有可点击元素（按钮/输入框/链接）
+  echo "$FIGMA_DATA" | jq -r '.. | select(.type? == "FRAME" or .type? == "COMPONENT" or .type? == "INSTANCE" or .type? == "BUTTON") | .name' | grep -i "按钮\|button\|输入\|input\|跳转\|link\|tab" | nl -ba | while read idx element; do
+    echo "| TC-$idx | 点击「$element」控件 | 响应符合设计预期，无崩溃无卡顿 | P0 |" >> "$OUTPUT_PATH"
+  done
+
+  # 通用UI校验用例
+  cat >> "$OUTPUT_PATH" <<EOF
+| TC-001 | 页面加载后检查所有元素显示 | 所有元素位置/颜色/大小和设计稿一致，无错位/缺失 | P0 |
+| TC-002 | 滑动页面查看滚动效果 | 滚动流畅无卡顿，元素位置正确 | P1 |
+| TC-003 | 横竖屏切换（如果支持） | 布局自适应，无元素溢出 | P2 |
+| TC-004 | 反复进出页面10次 | 无内存泄漏/崩溃/白屏 | P1 |
+EOF
+
+  echo "✅ 测试用例已生成: $OUTPUT_PATH"
+  echo "🤖 可以将生成的用例交给AI执行自动化测试"
 }
 
 # 8. 设计稿差异对比
@@ -529,6 +591,24 @@ case $1 in
       esac
     done
     design_diff "$PKG" "$FIGMA_URL" "$PAGE_NAME"
+    ;;
+  gen-testcases)
+    init
+    shift
+    FIGMA_URL=""
+    OUTPUT=""
+    while [[ $# -gt 0 ]]; do
+      case $1 in
+        --figma) FIGMA_URL=$2; shift 2;;
+        --output) OUTPUT=$2; shift 2;;
+        *) shift;;
+      esac
+    done
+    if [ -z "$FIGMA_URL" ]; then
+      echo "❌ 请提供Figma链接，示例：omnibench gen-testcases --figma <Figma链接>"
+      exit 1
+    fi
+    generate_test_cases "$FIGMA_URL" "$OUTPUT"
     ;;
   stability)
     init
