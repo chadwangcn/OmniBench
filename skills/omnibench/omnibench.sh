@@ -307,6 +307,20 @@ EOF
   echo "🤖 可以将生成的用例交给AI执行自动化测试"
 }
 
+# 10. 远程构建APK
+build_apk() {
+  GIT_REPO=$1
+  BRANCH=${2:-main}
+  BUILD_SERVICE="${CI_URL:-https://ci.lumi.ai}"
+  BUILD_DIR="$RESULT_DIR/build_${TIMESTAMP}"
+  mkdir -p "$BUILD_DIR"
+  APK_PATH="$BUILD_DIR/build.apk"
+  echo "🔨 开始远程构建: $GIT_REPO 分支: $BRANCH"
+  # 预留CI对接逻辑，后续补充具体接口实现
+  echo "⚠️  远程CI对接待实现，当前请指定本地APK路径安装"
+  return 1
+}
+
 # 8. 设计稿差异对比
 design_diff() {
   PKG=$1
@@ -630,10 +644,11 @@ case $1 in
     adb shell "$@"
     ;;
   *)
-    echo "ADB自动化测试工具（含UI还原/稳定性测试）"
-    echo "可用命令: install|log|screenshot|record|tap|swipe|keyevent|text|launch|stop|traverse|monkey|design-diff|stability|shell"
+    echo "OmniBench v0.1.0 通用测试工具集"
+    echo "可用命令: install|log|screenshot|record|tap|swipe|keyevent|text|launch|stop|traverse|monkey|design-diff|gen-testcases|stability|build|shell"
     echo "示例："
-    echo "  adb-mobile-test design-diff --name 首页 --figma https://www.figma.com/xxx → 对比首页和设计稿差异"
-    echo "  adb-mobile-test stability --duration 60 → 60分钟稳定性测试"
+    echo "  omnibench design-diff --name 首页 --figma https://www.figma.com/xxx → 对比首页和设计稿差异"
+    echo "  omnibench stability --duration 60 → 60分钟稳定性测试"
+    echo "  omnibench gen-testcases --figma <Figma链接> → 导出设计稿结构生成测试用例"
     ;;
 esac
